@@ -1,4 +1,69 @@
-- name: Package extension release
+name: CI
+
+on: 
+  push: 
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+  
+jobs:
+  build:
+    name: Build (Windows - x86_64)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sourcemod-version:
+          - 1.12-dev
+        target-archs:
+          - x86_64
+
+    steps:
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v7
+        with:
+            python-version: 3.11
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: extension
+          submodules: recursive
+
+      - name: Checkout SourceMod
+        uses: actions/checkout@v4
+        with:
+          repository: alliedmodders/sourcemod
+          ref: ${{ matrix.sourcemod-version }}
+          path: sourcemod
+          submodules: recursive
+
+      - name: Checkout AMBuild
+        uses: actions/checkout@v4
+        with:
+          repository: alliedmodders/ambuild
+          path: ambuild
+
+      - name: Install AMBuild
+        run: python -m pip install ./ambuild --no-build-isolation
+
+      - name: Build
+        working-directory: extension
+        shell: bash
+        run: |
+          echo "Build run number: ${{ github.run_number }}"
+          ls -a
+          mkdir build && cd build
+          python ../configure.py --enable-optimize --targets=${{ matrix.target-archs }}
+          ambuild
+
+      - name: Package extension release
         if: success()
         shell: bash
         env:
