@@ -1,69 +1,4 @@
-name: CI
-
-on: 
-  push: 
-    branches:
-      - dev
-  pull_request:
-    branches:
-      - dev
-  
-jobs:
-  build:
-    name: Build (Windows - x86_64)
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        sourcemod-version:
-          - 1.12-dev
-        target-archs:
-          - x86_64
-
-    steps:
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v7
-        with:
-            python-version: 3.11
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          path: extension
-          submodules: recursive
-
-      - name: Checkout SourceMod
-        uses: actions/checkout@v4
-        with:
-          repository: alliedmodders/sourcemod
-          ref: ${{ matrix.sourcemod-version }}
-          path: sourcemod
-          submodules: recursive
-
-      - name: Checkout AMBuild
-        uses: actions/checkout@v4
-        with:
-          repository: alliedmodders/ambuild
-          path: ambuild
-
-      - name: Install AMBuild
-        run: python -m pip install ./ambuild --no-build-isolation
-
-      - name: Build
-        working-directory: extension
-        shell: bash
-        run: |
-          echo "Build run number: ${{ github.run_number }}"
-          ls -a
-          mkdir build && cd build
-          python ../configure.py --enable-optimize --targets=${{ matrix.target-archs }}
-          ambuild
-
-      - name: Package extension release
+- name: Package extension release
         if: success()
         shell: bash
         env:
@@ -81,31 +16,23 @@ jobs:
           # SourceMod extensions belong in addons/sourcemod/extensions/
           mkdir -p "${STAGING_DIR}/addons/sourcemod/extensions"
 
-          # Debug: locate compiled binaries in the build directory
-          echo "Locating compiled binaries..."
-          find extension/build -type f \( -name "*.dll" -o -name "*.so" \)
+          # AMBuild already generates a package structure! Let's copy from there.
+          # Based on your log, AMBuild outputted to: extension/build/package/addons/sourcemod/extensions/
+          if [ -d "extension/build/package/addons" ]; then
+            echo "Copying from AMBuild package directory..."
+            cp -r extension/build/package/addons/* "${STAGING_DIR}/addons/"
+          else
+            echo "Fallback: Copying manually located binaries..."
+            find extension/build -type f -name "*.dll" -exec cp {} "${STAGING_DIR}/addons/sourcemod/extensions/" \;
+          fi
 
-          # Copy binaries to staging (adjust the path if AMBuild nests them deeper)
-          cp extension/build/*.dll "${STAGING_DIR}/addons/sourcemod/extensions/" || true
-          cp extension/build/*/*.dll "${STAGING_DIR}/addons/sourcemod/extensions/" || true
+          echo "Staged files ready for upload:"
+          find "${STAGING_DIR}" -type f
 
-          OUTPUT_NAME="my-extension-windows-${ARCH}-build${BUILD_NUMBER}.zip"
-
-          echo "Creating ${OUTPUT_NAME}..."
-          (
-            cd "${STAGING_DIR}"
-            zip -qr "${RELEASE_DIR}/${OUTPUT_NAME}" addons/
-          )
-
-          echo "Created archive in ${RELEASE_DIR}/${OUTPUT_NAME}"
-
-          echo "Generated release archives:"
-          find "${RELEASE_DIR}" -maxdepth 1 -type f -name '*.zip' -print | sort
-
-      - name: Upload release archives
+      - name: Upload release artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: sourcemod-extension-${{ matrix.target-archs }}
-          path: release/*.zip
+          name: sourcemod-extension-windows-${{ matrix.target-archs }}-build${{ github.run_number }}
+          path: ${{ runner.temp }}/extension-staging/
           if-no-files-found: error
