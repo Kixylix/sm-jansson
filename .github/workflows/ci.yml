@@ -10,7 +10,7 @@ on:
   
 jobs:
   build:
-    name: Build (Windows - ${{ matrix.target-archs }})
+    name: Build (Windows - x86_64)
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -18,7 +18,6 @@ jobs:
         sourcemod-version:
           - 1.12-dev
         target-archs:
-          - x86
           - x86_64
 
     steps:
@@ -63,3 +62,50 @@ jobs:
           mkdir build && cd build
           python ../configure.py --enable-optimize --targets=${{ matrix.target-archs }}
           ambuild
+
+      - name: Package extension release
+        if: success()
+        shell: bash
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          ARCH: ${{ matrix.target-archs }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_DIR="${GITHUB_WORKSPACE}/release"
+          mkdir -p "${RELEASE_DIR}"
+          
+          STAGING_DIR="${RUNNER_TEMP}/extension-staging"
+          rm -rf "${STAGING_DIR}"
+          
+          # SourceMod extensions belong in addons/sourcemod/extensions/
+          mkdir -p "${STAGING_DIR}/addons/sourcemod/extensions"
+
+          # Debug: locate compiled binaries in the build directory
+          echo "Locating compiled binaries..."
+          find extension/build -type f \( -name "*.dll" -o -name "*.so" \)
+
+          # Copy binaries to staging (adjust the path if AMBuild nests them deeper)
+          cp extension/build/*.dll "${STAGING_DIR}/addons/sourcemod/extensions/" || true
+          cp extension/build/*/*.dll "${STAGING_DIR}/addons/sourcemod/extensions/" || true
+
+          OUTPUT_NAME="my-extension-windows-${ARCH}-build${BUILD_NUMBER}.zip"
+
+          echo "Creating ${OUTPUT_NAME}..."
+          (
+            cd "${STAGING_DIR}"
+            zip -qr "${RELEASE_DIR}/${OUTPUT_NAME}" addons/
+          )
+
+          echo "Created archive in ${RELEASE_DIR}/${OUTPUT_NAME}"
+
+          echo "Generated release archives:"
+          find "${RELEASE_DIR}" -maxdepth 1 -type f -name '*.zip' -print | sort
+
+      - name: Upload release archives
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sourcemod-extension-${{ matrix.target-archs }}
+          path: release/*.zip
+          if-no-files-found: error
